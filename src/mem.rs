@@ -17,8 +17,8 @@
 #[derive(Default)]
 /// Provides a checked way to access memory offsets from a range of raw memory
 pub struct MemoryRegion {
-    base: u64,
-    length: u64,
+    pub base: u64,
+    pub length: u64,
 }
 
 impl MemoryRegion {

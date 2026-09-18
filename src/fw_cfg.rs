@@ -1,5 +1,13 @@
+use core::cmp::max;
+use core::mem;
+use core::mem::{size_of, MaybeUninit};
+use goblin::elf64::dynamic::{Dyn, DynamicInfo};
 use goblin::elf64::header::header64;
 use goblin::elf64::program_header::ProgramHeader;
+use goblin::elf64::{reloc, sym};
+use goblin::elf64::reloc::{r_to_str, reloc64, Rela};
+use goblin::elf64::section_header::SHN_UNDEF;
+use goblin::elf64::sym::{sym64, Sym, STB_WEAK};
 use goblin::elf::program_header;
 use plain::Plain;
 use x86_64::{
@@ -56,6 +64,10 @@ enum Command {
     PhdrData,
     ///Start reading loadable segment data
     SegData,
+
+
+    ElfRela,
+    ElfDynSym,
 }
 
 enum KernelType {
@@ -74,6 +86,8 @@ impl Into<u8> for Command {
             Self::ElfHdr => 3,
             Self::PhdrData => 4,
             Self::SegData => 5,
+            Self::ElfRela => 6,
+            Self::ElfDynSym => 7
         }
     }
 }
@@ -198,6 +212,118 @@ impl FwCfg {
         Self::debug_write(HASH_END);
     }
 
+    fn load_segment(&mut self, load_addr: u64, phdr: &ProgramHeader, hasher: &mut Sha256) -> MemoryRegion {
+        // Memory region for where the segment will be loaded
+        let mut bytes_to_read = phdr.p_filesz;
+        let mut seg = MemoryRegion::new(load_addr, bytes_to_read);
+        let mut seg_offset = 0;
+
+        // Tell hypervisor to serve first segment
+        self.do_command(Command::SegData);
+        loop {
+            let mut read_num = FW_CFG_DATA_SIZE;
+            if bytes_to_read < read_num {
+                read_num = bytes_to_read;
+            }
+            // alias for bounce buffer region
+            let src = &self.bounce_buffer.as_bytes()[0..read_num as usize];
+
+            //Copy portion of segment from bounce buffer to encrypted region
+            Self::debug_write(COPY_START);
+            seg.as_bytes()[seg_offset..seg_offset + read_num as usize].copy_from_slice(&src);
+            Self::debug_write(COPY_END);
+
+            //Hash what we just copied in encrypted memory
+            Self::debug_write(HASH_START);
+            hasher.update(&seg.as_bytes()[seg_offset..seg_offset + read_num as usize]);
+            Self::debug_write(HASH_END);
+
+
+            bytes_to_read -= read_num;
+            if bytes_to_read == 0 {
+                break;
+            } else {
+                seg_offset += read_num as usize;
+                //Tell hypervisor to serve next segment
+                self.do_command(Command::SegData);
+            }
+        }
+
+        seg
+    }
+
+    fn perform_relocs(&mut self, memory: &mut [u8]) {
+        self.do_command(Command::ElfRela);
+
+        let (num_sym, rest) = self.bounce_buffer.as_bytes().split_at(size_of::<u64>());
+        let num_sym = u64::from_le_bytes(num_sym.try_into().unwrap()) as usize;
+        let sym_size = num_sym * sym64::SIZEOF_SYM;
+        let (syms, rest) = rest.split_at(sym_size);
+
+        let (num_reloc, rest) = rest.split_at(size_of::<u64>());
+        let num_reloc = u64::from_le_bytes(num_reloc.try_into().unwrap()) as usize;
+        let reloc_size = num_reloc * reloc64::SIZEOF_RELA;
+        let relocs = &rest[..reloc_size];
+
+        let syms = Sym::slice_from_bytes(&syms).unwrap();
+        let relocs = Rela::slice_from_bytes(relocs).unwrap();
+
+        const ELF_ARCH: u16 = goblin::elf::header::EM_X86_64;
+        const R_ABS64: u32 = goblin::elf::reloc::R_X86_64_64;
+        const R_RELATIVE: u32 = goblin::elf::reloc::R_X86_64_RELATIVE;
+        const R_GLOB_DAT: u32 = goblin::elf::reloc::R_X86_64_GLOB_DAT;
+
+        for rela in relocs {
+            match reloc::r_type(rela.r_info) {
+                R_ABS64 => {
+                    let sym = reloc::r_sym(rela.r_info) as usize;
+                    let sym = &syms[sym];
+
+                    if sym::st_bind(sym.st_info) == STB_WEAK
+                        && u32::from(sym.st_shndx) == SHN_UNDEF
+                    {
+                        let memory = &memory[rela.r_offset as usize..][..8];
+                        assert_eq!(memory, &[0; 8]);
+                        continue;
+                    }
+
+                    let relocated =
+                        (KERNEL_LOAD_ADDR as i64 + sym.st_value as i64 + rela.r_addend).to_ne_bytes();
+                    let buf = &relocated[..];
+                    memory[rela.r_offset as usize..][..mem::size_of_val(&relocated)]
+                        .copy_from_slice(buf);
+                }
+                R_RELATIVE => {
+                    let relocated = (KERNEL_LOAD_ADDR as i64 + rela.r_addend).to_ne_bytes();
+                    let buf = &relocated[..];
+                    memory[rela.r_offset as usize..][..mem::size_of_val(&relocated)]
+                        .copy_from_slice(buf);
+                }
+                R_GLOB_DAT => {
+                    let sym = reloc::r_sym(rela.r_info) as usize;
+                    let sym = &syms[sym];
+
+                    if sym::st_bind(sym.st_info) == STB_WEAK
+                        && u32::from(sym.st_shndx) == SHN_UNDEF
+                    {
+                        let memory = &memory[rela.r_offset as usize..][..8];
+                        assert_eq!(memory, &[0; 8]);
+                        continue;
+                    }
+
+                    let relocated =
+                        (KERNEL_LOAD_ADDR as i64 + sym.st_value as i64 + rela.r_addend).to_ne_bytes();
+                    #[cfg(target_arch = "x86_64")]
+                    assert_eq!(rela.r_addend, 0);
+                    let buf = &relocated[..];
+                    memory[rela.r_offset as usize..][..mem::size_of_val(&relocated)]
+                        .copy_from_slice(buf);
+                }
+                typ => panic!("unknown relocation type {}", r_to_str(typ, ELF_ARCH)),
+            }
+        }
+    }
+
     pub fn load_kernel_elf(
         &mut self,
         initrd_plain_text_addr: u64,
@@ -233,70 +359,49 @@ impl FwCfg {
         assert!(elf_header.e_phnum <= 64, "too many headers");
 
         // Stack is in c bit mem so this is fine
-        let mut program_headers = [[0u8; ELF_PHDR_SIZE]; 64];
+        let mut program_headers = [0u8; ELF_PHDR_SIZE * 64];
 
         // Read all the program headers
         for i in 0..elf_header.e_phnum {
-            self.read_next_program_header(&mut hasher, &mut program_headers[i as usize]);
+            let hdr = &mut program_headers[(i as usize * ELF_PHDR_SIZE)..((i as usize + 1) * ELF_PHDR_SIZE)];
+            self.read_next_program_header(&mut hasher, hdr.try_into().unwrap());
         }
 
-        // Copy and hash loadable segments
-        for program_hdr in program_headers {
-            let phdr = plain::from_bytes::<ProgramHeader>(&program_hdr)
-                .map_err(|_| "failed to parse program header")?;
+        let program_headers = plain::slice_from_bytes_len::<ProgramHeader>(&program_headers, elf_header.e_phnum as usize)
+            .map_err(|_| "failed to parse program header")?;
 
-            if phdr.p_type & program_header::PT_LOAD == 0 || phdr.p_filesz == 0 {
+        // Copy and hash loadable segments
+        let mut max_addr = 0u64;
+        Self::debug_write(0xF4);
+        Self::debug_write(program_headers.len() as u8);
+        Self::debug_write(0xF4);
+
+
+        for phdr in program_headers {
+            if phdr.p_filesz == 0 || phdr.p_type != program_header::PT_LOAD {
+                Self::debug_write(0xF5);
+
+                Self::debug_write((phdr.p_type >> 8) as u8);
+                Self::debug_write(phdr.p_type as u8);
+                Self::debug_write(0xF5);
+
                 continue;
             }
+            Self::debug_write(0xF6);
 
-            let load_addr = if is_relocatable { KERNEL_LOAD_ADDR + phdr.p_paddr } else { phdr.p_paddr };
+            let load_addr = if is_relocatable { KERNEL_LOAD_ADDR + phdr.p_vaddr } else { phdr.p_vaddr };
+            let reg =self.load_segment(load_addr, phdr, &mut hasher);
 
-
-            Self::debug_write(0x99);
-
-
-            Self::debug_write((load_addr >> 24) as u8);
-            Self::debug_write((load_addr >> 16) as u8);
-            Self::debug_write((load_addr >> 8) as u8);
-            Self::debug_write(load_addr as u8);
-
-
-            Self::debug_write(0x99);
-
-
-            // memory region for where the segment will be loaded
-            let mut bytes_to_read = phdr.p_filesz;
-            let mut seg = MemoryRegion::new(load_addr, bytes_to_read);
-            let mut seg_offset = 0;
-            // Tell hypervisor to serve first segment
-            self.do_command(Command::SegData);
-            loop {
-                let mut read_num = FW_CFG_DATA_SIZE;
-                if bytes_to_read < read_num {
-                    read_num = bytes_to_read;
-                }
-                // alias for bounce buffer region
-                let src = &self.bounce_buffer.as_bytes()[0..read_num as usize];
-
-                //Copy portion of segment from bounce buffer to encrypted region
-                Self::debug_write(COPY_START);
-                seg.as_bytes()[seg_offset..seg_offset + read_num as usize].copy_from_slice(&src);
-                Self::debug_write(COPY_END);
-
-                //Hash what we just copied in encrypted memory
-                Self::debug_write(HASH_START);
-                hasher.update(&seg.as_bytes()[seg_offset..seg_offset + read_num as usize]);
-                Self::debug_write(HASH_END);
-
-                bytes_to_read -= read_num;
-                if bytes_to_read == 0 {
-                    break;
-                } else {
-                    seg_offset += read_num as usize;
-                    //Tell hypervisor to serve next segment
-                    self.do_command(Command::SegData);
-                }
+            let end_addr = reg.base + reg.length;
+            if end_addr > max_addr {
+                max_addr = end_addr;
             }
+        }
+
+        // Perform relocations
+        if is_relocatable {
+            let mut mem_region = MemoryRegion::new(KERNEL_LOAD_ADDR, max_addr - KERNEL_LOAD_ADDR);
+            // self.perform_relocs(mem_region.as_bytes())
         }
 
         Self::debug_write(HASH_START);

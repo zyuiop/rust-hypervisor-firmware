@@ -2,7 +2,6 @@ use crate::ghcb;
 use crate::ghcb::Ghcb;
 use core::arch::asm;
 use x86_64::instructions::hlt;
-use x86_64::set_general_handler;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
@@ -44,32 +43,6 @@ extern "x86-interrupt" fn vmm_comm_handler(stack_frame: InterruptStackFrame, err
     //jump over the faulting instruction
     unsafe { *ret_addr = stack_frame.instruction_pointer.as_u64() + 1 };
 }
-
-
-fn abort(stack_frame: InterruptStackFrame, index: u8, error_code: Option<u64>) {
-    ghcb::Ghcb::port_io(0x80, 0xCC, 0);
-    ghcb::Ghcb::port_io(0x80, index, 0);
-
-    if let Some(err) = error_code {
-        ghcb::Ghcb::port_io(0x80, 0xCD, 0);
-
-        ghcb::Ghcb::port_io(0x80, ((err >> 56) & 0xff) as u8, 0);
-        ghcb::Ghcb::port_io(0x80, ((err >> 48) & 0xff) as u8, 0);
-        ghcb::Ghcb::port_io(0x80, ((err >> 40) & 0xff) as u8, 0);
-        ghcb::Ghcb::port_io(0x80, ((err >> 32) & 0xff) as u8, 0);
-        ghcb::Ghcb::port_io(0x80, ((err >> 24) & 0xff) as u8, 0);
-        ghcb::Ghcb::port_io(0x80, ((err >> 16) & 0xff) as u8, 0);
-        ghcb::Ghcb::port_io(0x80, ((err >> 8) & 0xff) as u8, 0);
-        ghcb::Ghcb::port_io(0x80, ((err >> 0) & 0xff) as u8, 0);
-    }
-
-    loop {
-        unsafe {
-            asm!("hlt");
-        }
-    }
-}
-
 
 pub fn init_idt() {
     unsafe {
