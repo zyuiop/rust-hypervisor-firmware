@@ -57,11 +57,13 @@ pub fn page_state_change(addr: u64, len: u64, private: bool) {
             value |= 1 << 63;
         }
 
+        let prev_value = unsafe { ghcb_msr.read() };
         unsafe { ghcb_msr.write(value) };
 
         unsafe {
             core::arch::asm!("rep; vmmcall\n\r");
         }
+        unsafe { ghcb_msr.write(prev_value) };
 
         if addr & (0x200000 - 1) == 0 && (addr + len_aligned) >= addr + 0x200_000 {
             len_aligned -= 0x200000;

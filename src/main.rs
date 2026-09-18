@@ -41,7 +41,6 @@ mod serial;
 #[macro_use]
 mod asm;
 mod boot;
-mod elf;
 mod fw_cfg;
 mod gdt;
 mod ghcb;

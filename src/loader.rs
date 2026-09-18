@@ -1,3 +1,4 @@
+use x86_64::instructions::port::Port;
 // Copyright © 2019 Intel Corporation
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -39,9 +40,25 @@ impl Kernel {
     pub fn boot(&mut self) {
         let jump_address = self.entry_point;
 
+        let mut debug_port = Port::<u8>::new(0x80);
+        let ct = jump_address as *const u8;
+
+        unsafe { debug_port.write(0xa0) }
+        unsafe {
+            debug_port.write(*ct);
+            debug_port.write(*ct.add(1));
+            debug_port.write(*ct.add(2));
+            debug_port.write(*ct.add(3));
+            debug_port.write(*ct.add(4));
+            debug_port.write(*ct.add(5));
+        }
+
         // Rely on x86 C calling convention where second argument is put into %rsi register
         let ptr = jump_address as *const ();
         let code: extern "C" fn(u64, u64) = unsafe { core::mem::transmute(ptr) };
+
+        unsafe { debug_port.write(0xa0) }
+
         (code)(0 /* dummy value */, ZERO_PAGE_START);
     }
 }

@@ -1,3 +1,5 @@
+cargo-features = ["profile-rustflags"]
+
 [package]
 name = "hypervisor-fw"
 version = "0.4.0"
@@ -25,11 +27,21 @@ log-panic = ["log-serial"]
 
 [dependencies]
 bitflags = "1.3.2"
-x86_64 = "0.14.10"
+x86_64 = { version = "0.14.10", default-features = false, features = ["abi_x86_interrupt"] }
 atomic_refcell = "0.1.8"
 uart_16550 = "0.2.18"
 digest = "0.10.5"
-sha2 = { git="https://github.com/bencw12/hashes", branch = "sev-es", default-features = false }
+sha2 = { version = "0.11.0", default-features = false }
+goblin = { version = "0.10.7", features = ["elf64"], default-features = false }
+plain = "0.2.3"
+
+[profile.dev.package.sha2]
+# There is a weird compiler bug for target x86_64-unknown-none... We must therefore use the soft implementation.
+rustflags = ["--cfg", "sha2_backend=\"soft\""]
+
+[profile.release.package.sha2]
+# There is a weird compiler bug for target x86_64-unknown-none... We must therefore use the soft implementation.
+rustflags = ["--cfg", "sha2_backend=\"soft\""]
 
 [dev-dependencies]
 dirs = "4.0.0"
