@@ -26,6 +26,7 @@ use crate::{
 };
 use sha2::Digest;
 use sha2::Sha256;
+use x86_64::structures::paging::{PageSize, Size2MiB};
 
 // load the kernel at 2mib in encrypted memory
 // Firecracker puts kernel at 32mib
@@ -215,7 +216,7 @@ impl FwCfg {
     fn load_segment(&mut self, load_addr: u64, phdr: &ProgramHeader, hasher: &mut Sha256) -> MemoryRegion {
         // Memory region for where the segment will be loaded
         let mut bytes_to_read = phdr.p_filesz;
-        let mut seg = MemoryRegion::new(load_addr, bytes_to_read);
+        let mut seg = MemoryRegion::new(load_addr, phdr.p_memsz);
         let mut seg_offset = 0;
 
         // Tell hypervisor to serve first segment
@@ -246,6 +247,12 @@ impl FwCfg {
                 seg_offset += read_num as usize;
                 //Tell hypervisor to serve next segment
                 self.do_command(Command::SegData);
+            }
+        }
+
+        if phdr.p_filesz < phdr.p_memsz {
+            for byte in (&mut seg.as_bytes()[phdr.p_filesz as usize..]) {
+                *byte = 0;
             }
         }
 
@@ -401,7 +408,7 @@ impl FwCfg {
         // Perform relocations
         if is_relocatable {
             let mut mem_region = MemoryRegion::new(KERNEL_LOAD_ADDR, max_addr - KERNEL_LOAD_ADDR);
-            // self.perform_relocs(mem_region.as_bytes())
+            self.perform_relocs(mem_region.as_bytes())
         }
 
         Self::debug_write(HASH_START);
@@ -409,8 +416,7 @@ impl FwCfg {
         Self::debug_write(HASH_END);
 
         //Verify segments hash
-        // Self::validate_hash(&seg_hash, &self.kernel_hash.as_bytes())
-            // .map_err(|_| "vmlinux verification failed")?;
+        // Self::validate_hash(&seg_hash, &self.kernel_hash.as_bytes()).map_err(|_| "kernel verification failed")?;
 
         Self::debug_write(0x90);
 
@@ -497,17 +503,20 @@ impl FwCfg {
         // paging::pvalidate_ram(&entry, 0 as u64, 0, 0, false);
 
         //re-validate the region we used for the plain text initrd
-        let entry = BootE820Entry {
-            addr: initrd_plain_text_addr,
-            size: initrd_size_aligned,
-            type_: 1,
-        };
-        Self::debug_write(0x97);
-        paging::pvalidate_ram(&entry, 0 as u64, 0, 0, false);
+        // let entry = BootE820Entry {
+        //     addr: initrd_plain_text_addr,
+        //     size: initrd_size_aligned,
+        //     type_: 1,
+        // };
+        // Self::debug_write(0x97);
+        // paging::pvalidate_ram(&entry, 0 as u64, 0, 0, false);
 
         Self::debug_write(0x99);
 
 
+        Self::debug_write(((kernel_params.entry_point >> 54) & 0xff) as u8);
+        Self::debug_write(((kernel_params.entry_point >> 48) & 0xff) as u8);
+        Self::debug_write(((kernel_params.entry_point >> 40) & 0xff) as u8);
         Self::debug_write(((kernel_params.entry_point >> 32) & 0xff) as u8);
         Self::debug_write(((kernel_params.entry_point >> 24) & 0xff) as u8);
         Self::debug_write(((kernel_params.entry_point >> 16) & 0xff) as u8);
