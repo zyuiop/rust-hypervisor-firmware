@@ -2,7 +2,6 @@ use crate::mem::MemoryRegion;
 
 pub const GHCB_ADDR: u32 = 0x1000000 - 0x400000; //48MiB
 pub const GHCB_MSR: u32 = 0xC001_0130;
-pub static mut SEV_ES: bool = false;
 
 // pub const SEV_STATUS_MSR: u32 = 0xC001_0131;
 #[derive(Clone, Copy, Debug)]
@@ -53,9 +52,8 @@ pub fn page_state_change(addr: u64, len: u64, private: bool) {
         let mut value = if private { 1 << 52 } else { 2 << 52 };
         value |= addr & !0xfff;
         value |= 0x014;
-        if addr & (0x200000 - 1) == 0 && (addr + len_aligned) >= addr + 0x200_000 {
-            value |= 1 << 63;
-        }
+
+        // MSR protocol implem on linux ignores page size: we HAVE to split by 4KiB
 
         let prev_value = unsafe { ghcb_msr.read() };
         unsafe { ghcb_msr.write(value) };
@@ -65,13 +63,8 @@ pub fn page_state_change(addr: u64, len: u64, private: bool) {
         }
         unsafe { ghcb_msr.write(prev_value) };
 
-        if addr & (0x200000 - 1) == 0 && (addr + len_aligned) >= addr + 0x200_000 {
-            len_aligned -= 0x200000;
-            addr += 0x200000;
-        } else {
-            len_aligned -= 0x1000;
-            addr += 0x1000;
-        }
+        len_aligned -= 0x1000;
+        addr += 0x1000;
     }
 }
 
@@ -101,8 +94,6 @@ impl Ghcb {
     }
     //Write ghcb struct to ghcb page
     pub fn port_io(port: u16, value: u8, op: u8) {
-        unsafe { SEV_ES = true };
-
         let rax: u64 = value as u64;
         let exitinfo1: u64 = ((port as u64) << 16) | 0x10 | (op as u64);
 

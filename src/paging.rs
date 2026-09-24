@@ -7,7 +7,7 @@ use x86_64::{
 
 use x86_64::instructions::port::Port;
 
-use crate::{boot::BootE820Entry, fw_cfg::KERNEL_ADDR};
+use crate::{boot::BootE820Entry, fw_cfg::BOUNCE_BUFFER_ADDR};
 use crate::{
     ghcb::GHCB_ADDR,
     loader::{SECRETS_PAGE_ADDR, SECRETS_PAGE_LEN},
@@ -39,7 +39,7 @@ pub fn setup(plain_text: bool, initrd_plain_text_addr: u64, initrd_size_aligned:
     for l2 in l2s.iter_mut() {
         for l2e in l2.iter_mut() {
             //leave C-bit clear on [16MB, 34MB) (8 pages for bzimage and 1 page for GHCB)
-            let addr = if (next_addr.as_u64() == KERNEL_ADDR)
+            let addr = if (next_addr.as_u64() == BOUNCE_BUFFER_ADDR)
                 || (next_addr.as_u64() == GHCB_ADDR as u64)
                 || ((next_addr.as_u64() >= initrd_plain_text_addr)
                     && (next_addr.as_u64() < initrd_plain_text_addr + initrd_size_aligned))
@@ -90,7 +90,7 @@ pub fn pvalidate_ram(
     const ZERO_PAGE_START: u64 = 0x7000; // 28K
     const FIRMWARE_START: u64 = 0x100000; // 1M
     const KERNEL_HASH_START: u64 = FIRMWARE_START - 0x1000; //1M - 4K
-    const KERNEL_PLAIN_TEXT: u64 = KERNEL_ADDR; // 16M
+    const KERNEL_PLAIN_TEXT: u64 = BOUNCE_BUFFER_ADDR; // 16M
     const KERNEL_CMDLINE: u64 = 0x20000; //128K
     const GHCB_PAGE: u64 = GHCB_ADDR as u64; // 32M
     const STACK_SIZE: u64 = 0x20000;
