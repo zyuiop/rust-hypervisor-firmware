@@ -49,28 +49,24 @@ pub fn page_state_change(addr: u64, len: u64, private: bool) {
         len
     };
     let mut addr = addr;
+
+    let prev_value = unsafe { ghcb_msr.read() };
     while len_aligned > 0 {
         let mut value = if private { 1 << 52 } else { 2 << 52 };
         value |= addr & !0xfff;
         value |= 0x014;
-        if addr & (0x200000 - 1) == 0 && (addr + len_aligned) >= addr + 0x200_000 {
-            value |= 1 << 63;
-        }
 
+        // MSR protocol implem on linux ignores page size: we HAVE to split by 4KiB
         unsafe { ghcb_msr.write(value) };
 
         unsafe {
             core::arch::asm!("rep; vmmcall\n\r");
         }
 
-        if addr & (0x200000 - 1) == 0 && (addr + len_aligned) >= addr + 0x200_000 {
-            len_aligned -= 0x200000;
-            addr += 0x200000;
-        } else {
-            len_aligned -= 0x1000;
-            addr += 0x1000;
-        }
+        len_aligned -= 0x1000;
+        addr += 0x1000;
     }
+    unsafe { ghcb_msr.write(prev_value) };
 }
 
 pub fn register_ghcb_page() {
