@@ -5,13 +5,13 @@ use x86_64::{
     PhysAddr,
 };
 
-use x86_64::instructions::port::Port;
-
 use crate::{boot::BootE820Entry, fw_cfg::BOUNCE_BUFFER_ADDR};
 use crate::{
     ghcb::GHCB_ADDR,
     loader::{SECRETS_PAGE_ADDR, SECRETS_PAGE_LEN},
 };
+use x86_64::instructions::port::Port;
+use x86_64::structures::paging::Size4KiB;
 // Amount of memory we identity map in setup(), max 512 GiB.
 #[no_mangle]
 static ADDRESS_SPACE_GIB_COPY: u32 = 1;
@@ -24,23 +24,42 @@ pub static mut L4_TABLE: PageTable = PageTable::new();
 #[no_mangle]
 pub static mut L3_TABLE: PageTable = PageTable::new();
 #[no_mangle]
-pub static mut L2_TABLES: [PageTable; ADDRESS_SPACE_GIB] = [TABLE; ADDRESS_SPACE_GIB];
+pub static mut L2_TABLE: PageTable = PageTable::new();
+#[no_mangle]
+pub static mut L1_TABLE: PageTable = PageTable::new();
+
 #[no_mangle]
 static SEV_ENC_BIT: u64 = 1 << 51;
 
 pub fn setup(plain_text: bool, initrd_plain_text_addr: u64, initrd_size_aligned: u64) {
     // SAFETY: This function is idempontent and only writes to static memory and
     // CR3. Thus, it is safe to run multiple times or on multiple threads.
-    let (l4, l3, l2s) = unsafe { (&mut L4_TABLE, &mut L3_TABLE, &mut L2_TABLES) };
+    let (l4, l3, l2, l1) = unsafe { (&mut L4_TABLE, &mut L3_TABLE, &mut L2_TABLE, &mut L1_TABLE) };
 
     let pt_flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
+    // Setup Identity map for the first 2MB region using L2 huge pages
+    let mut next_addr = PhysAddr::new(0);
+    for e in l1.iter_mut() {
+        let addr = if next_addr.as_u64() == GHCB_ADDR as u64 {
+            PhysAddr::new(next_addr.as_u64())
+        } else {
+            PhysAddr::new(next_addr.as_u64() | SEV_ENC_BIT)
+        };
+        e.set_addr(addr, pt_flags);
+        next_addr += Size4KiB::SIZE;
+    }
+
     // Setup Identity map using L2 huge pages
     let mut next_addr = PhysAddr::new(0);
-    for l2 in l2s.iter_mut() {
-        for l2e in l2.iter_mut() {
+    for l2e in l2.iter_mut() {
+        if next_addr.as_u64() == 0 {
+            l2e.set_addr(
+                PhysAddr::new(phys_addr(l1).as_u64() | SEV_ENC_BIT),
+                pt_flags,
+            );
+        } else {
             //leave C-bit clear on [16MB, 34MB) (8 pages for bzimage and 1 page for GHCB)
             let addr = if (next_addr.as_u64() == BOUNCE_BUFFER_ADDR)
-                || (next_addr.as_u64() == GHCB_ADDR as u64)
                 || ((next_addr.as_u64() >= initrd_plain_text_addr)
                     && (next_addr.as_u64() < initrd_plain_text_addr + initrd_size_aligned))
                     && plain_text
@@ -50,16 +69,14 @@ pub fn setup(plain_text: bool, initrd_plain_text_addr: u64, initrd_size_aligned:
                 PhysAddr::new(next_addr.as_u64() | SEV_ENC_BIT)
             };
             l2e.set_addr(addr, pt_flags | PageTableFlags::HUGE_PAGE);
-            next_addr += Size2MiB::SIZE;
         }
+        next_addr += Size2MiB::SIZE;
     }
 
     // Point L3 at L2s
-    for (i, l2) in l2s.iter().enumerate() {
-        let addr = phys_addr(l2).as_u64() | SEV_ENC_BIT;
-        let addr = PhysAddr::new(addr);
-        l3[i].set_addr(addr, pt_flags);
-    }
+    let addr = phys_addr(l2).as_u64() | SEV_ENC_BIT;
+    let addr = PhysAddr::new(addr);
+    l3[0].set_addr(addr, pt_flags);
 
     // Point L4 at L3
     let addr = phys_addr(l3).as_u64() | SEV_ENC_BIT;
@@ -122,9 +139,9 @@ pub fn pvalidate_ram(
             npgs -= 4;
         }
         // //skip over ghcb page if
-        if start_pg == (GHCB_PAGE >> 12) && plain_text {
-            start_pg += 512;
-            npgs -= 512;
+        if start_pg == (GHCB_PAGE >> 12) {
+            start_pg += 1;
+            npgs -= 1;
         }
         // //skip plain text kernel
         if start_pg == (KERNEL_PLAIN_TEXT >> 12) && plain_text {
@@ -152,7 +169,11 @@ pub fn pvalidate_ram(
             start_pg += 1;
             npgs -= 1;
         }
-        if start_pg == unsafe { L2_TABLES.as_ptr() as *const _ as u64 } >> 12 {
+        if start_pg == unsafe { &L2_TABLE as *const _ as u64 } >> 12 {
+            start_pg += 1;
+            npgs -= 1;
+        }
+        if start_pg == unsafe { &L1_TABLE as *const _ as u64 } >> 12 {
             start_pg += 1;
             npgs -= 1;
         }

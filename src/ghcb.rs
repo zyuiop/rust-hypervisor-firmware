@@ -1,6 +1,6 @@
 use crate::mem::MemoryRegion;
 
-pub const GHCB_ADDR: u32 = 0x1000000 - 0x400000; //48MiB
+pub const GHCB_ADDR: u32 = 0x3000; //48MiB
 pub const GHCB_MSR: u32 = 0xC001_0130;
 
 // pub const SEV_STATUS_MSR: u32 = 0xC001_0131;

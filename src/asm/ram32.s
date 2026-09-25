@@ -14,12 +14,40 @@ ram32_start:
 	wrmsr
 	rep vmmcall
 
-validate_L2:
-	movl $L2_TABLES + 4, %edi
+validate_L1:
+	movl $L1_TABLE + 4, %edi
 	movl $0xfff, %eax
 	notl %eax
 	andl %eax, %edi
+pvalidate_L1:
+	# validate the pages we need for initial page tables
+	movl %edi, %eax
+	# page size, 0 = 4k, 1 = 2mb
+	movl $0, %ecx
+	# valid bit
+	movl $1, %edx
 
+	pvalidate
+
+	# get carry flag
+	setc %dl
+
+	# check for success (0)
+	cmp  $0, %eax
+	jne  error
+
+	# check if rmp was actually updated (CF = 0)
+	cmp  $0, %dl
+	jne   error
+pvalidate_L1_done:
+	xor	 %eax, %eax
+	xor  %edi, %edi
+
+validate_L2:
+	movl $L2_TABLE + 4, %edi
+	movl $0xfff, %eax
+	notl %eax
+	andl %eax, %edi
 pvalidate_L2:
 	# validate the pages we need for initial page tables
 	movl %edi, %eax
@@ -29,14 +57,14 @@ pvalidate_L2:
 	movl $1, %edx
 
 	pvalidate
-	
+
 	# get carry flag
 	setc %dl
 
 	# check for success (0)
 	cmp  $0, %eax
 	jne  error
-	
+
 	# check if rmp was actually updated (CF = 0)
 	cmp  $0, %dl
 	jne   error
@@ -141,11 +169,11 @@ setup_page_tables:
 	bts  %eax, %edx
 
 	# First L2 entry identity maps [0, 2 MiB)
-	movl $0b10000011, (L2_TABLES) # huge (bit 7), writable (bit 1), present (bit 0)
-	movl %edx, (L2_TABLES+4)
+	movl $0b10000011, (L2_TABLE) # huge (bit 7), writable (bit 1), present (bit 0)
+	movl %edx, (L2_TABLE+4)
 	
 	# First L3 entry points to L2 table
-	movl $L2_TABLES, %eax
+	movl $L2_TABLE, %eax
 	orb  $0b00000011, %al # writable (bit 1), present (bit 0)
 	movl %eax, (L3_TABLE)
 	movl %edx, (L3_TABLE+4)
