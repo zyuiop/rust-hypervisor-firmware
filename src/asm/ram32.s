@@ -3,6 +3,9 @@
 .code32
 
 ram32_start:
+	# stash kernel length
+	movl %ecx, %ebx
+
 	# DEBUG signal to the hypervisor that this is the firmware entry point
 	movl $0xC0010130, %ecx
 	xorl %eax, %eax
@@ -190,8 +193,9 @@ jump_to_64bit:
 
 	movl $stack_start, %esp
 
-	movl $stack_start, %edi
+	movl $stack_start, %esi
 
+	movl %ebx, %edi
 	# Set CS to a 64-bit segment and jump to 64-bit Rust code.
 	ljmpl $0x08, $rust64_start
 
