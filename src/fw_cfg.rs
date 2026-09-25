@@ -1,7 +1,5 @@
-use core::cmp::max;
 use core::mem;
-use core::mem::{size_of, MaybeUninit};
-use goblin::elf64::dynamic::{Dyn, DynamicInfo};
+use core::mem::size_of;
 use goblin::elf64::header::header64;
 use goblin::elf64::program_header::ProgramHeader;
 use goblin::elf64::{reloc, sym};
@@ -513,17 +511,12 @@ impl FwCfg {
 
         Self::debug_write(0x99);
 
-
-        Self::debug_write(((kernel_params.entry_point >> 54) & 0xff) as u8);
-        Self::debug_write(((kernel_params.entry_point >> 48) & 0xff) as u8);
-        Self::debug_write(((kernel_params.entry_point >> 40) & 0xff) as u8);
-        Self::debug_write(((kernel_params.entry_point >> 32) & 0xff) as u8);
-        Self::debug_write(((kernel_params.entry_point >> 24) & 0xff) as u8);
-        Self::debug_write(((kernel_params.entry_point >> 16) & 0xff) as u8);
-        Self::debug_write(((kernel_params.entry_point >> 8) & 0xff) as u8);
-        Self::debug_write(((kernel_params.entry_point >> 0) & 0xff) as u8);
-
-
+        let value = CPUID_PAGE_ADDR as *const u32;
+        let value = unsafe { *value };
+        Self::debug_write((value >> 24) as u8);
+        Self::debug_write((value >> 16) as u8);
+        Self::debug_write((value >> 8) as u8);
+        Self::debug_write((value >> 0) as u8);
         Self::debug_write(0x99);
         kernel_params.boot();
 
