@@ -470,35 +470,28 @@ impl FwCfg {
             bootparams_header.setup_data = setup_data_addr as u64;
         }
 
-        Self::debug_write(0x92);
-
-
         if initrd_len > 0 {
             self.load_initrd(initrd_plain_text_addr, initrd_load_addr, initrd_len)?;
         }
-        Self::debug_write(0x93);
 
         // //set the plain text region for the kernel and the ghcb page private
-        // ghcb::page_state_change(KERNEL_ADDR, Size2MiB::SIZE, true);
+        ghcb::page_state_change(BOUNCE_BUFFER_ADDR, Size2MiB::SIZE, true);
 
-        Self::debug_write(0x94);
         // //set plain text region for initrd private
         if initrd_len > 0 {
             ghcb::page_state_change(initrd_plain_text_addr, initrd_size_aligned, true);
         }
-        Self::debug_write(0x95);
 
         //set the C-bit everywhere
         paging::setup(false, 0, 0);
-        Self::debug_write(0x96);
 
         //re-validate the region we used for the plain text kernel
-        // let entry = BootE820Entry {
-        //     addr: BOUNCE_BUFFER_ADDR,
-        //     size: Size2MiB::SIZE,
-        //     type_: 1,
-        // };
-        // paging::pvalidate_ram(&entry, 0 as u64, 0, 0, false);
+        let entry = BootE820Entry {
+            addr: BOUNCE_BUFFER_ADDR,
+            size: Size2MiB::SIZE,
+            type_: 1,
+        };
+        paging::pvalidate_ram(&entry, 0 as u64, 0, 0, false);
 
         //re-validate the region we used for the plain text initrd
         let entry = BootE820Entry {
@@ -506,18 +499,8 @@ impl FwCfg {
             size: initrd_size_aligned,
             type_: 1,
         };
-        Self::debug_write(0x97);
         paging::pvalidate_ram(&entry, 0 as u64, 0, 0, false);
 
-        Self::debug_write(0x99);
-
-        let value = CPUID_PAGE_ADDR as *const u32;
-        let value = unsafe { *value };
-        Self::debug_write((value >> 24) as u8);
-        Self::debug_write((value >> 16) as u8);
-        Self::debug_write((value >> 8) as u8);
-        Self::debug_write((value >> 0) as u8);
-        Self::debug_write(0x99);
         kernel_params.boot();
 
         Ok(())
