@@ -17,6 +17,7 @@ use sha2::Sha256;
 const KERNEL_LOAD: u64 = 0x200000;
 //Firecracker puts kernel at 32mib
 pub const KERNEL_ADDR: u64 = 0x2000000;
+pub const KERNEL_END_ADDR: u64 = KERNEL_ADDR + KERNEL_MAX_LEN;
 //Max bzImage length (16MiB)
 pub const KERNEL_MAX_LEN: u64 = 0x1000000;
 
@@ -175,7 +176,7 @@ impl FwCfg {
         }
 
         //set the plain text region for the kernel and the ghcb page private
-        ghcb::page_state_change(KERNEL_ADDR, KERNEL_MAX_LEN + Size2MiB::SIZE, true);
+        ghcb::page_state_change(KERNEL_ADDR, KERNEL_MAX_LEN, true);
 
         //set plain text region for initrd private
         ghcb::page_state_change(initrd_plain_text_addr, initrd_size_aligned, true);
@@ -186,7 +187,7 @@ impl FwCfg {
         //re-validate the region we used for the plain text kernel
         let entry = boot_e820_entry {
             addr: KERNEL_ADDR,
-            size: KERNEL_MAX_LEN + Size2MiB::SIZE,
+            size: KERNEL_MAX_LEN,
             type_: 1,
         };
         paging::pvalidate_ram(&entry, 0 as u64, 0, 0, false);

@@ -2,7 +2,7 @@ use x86_64::structures::paging::{PageSize, Size2MiB};
 
 use crate::mem::MemoryRegion;
 
-pub const GHCB_ADDR: u32 = 24 * Size2MiB::SIZE as u32; //48MiB
+pub const GHCB_ADDR: u32 = 0x3000; //48MiB
 pub const GHCB_MSR: u32 = 0xC001_0130;
 // pub const SEV_STATUS_MSR: u32 = 0xC001_0131;
 #[derive(Clone, Copy, Debug)]
