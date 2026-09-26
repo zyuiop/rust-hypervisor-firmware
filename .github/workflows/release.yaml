@@ -19,8 +19,6 @@ jobs:
           default: true
       - name: Install rust-src
         run: rustup component add rust-src llvm-tools-preview
-      - name: Install objcopy
-        run: cargo install cargo-binutils@0.1.0
       - name: Checkout sev-snp
         uses: actions/checkout@v4
         with:
