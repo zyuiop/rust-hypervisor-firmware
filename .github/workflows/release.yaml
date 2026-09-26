@@ -40,7 +40,7 @@ jobs:
         run: cargo b
         working-directory: ./repository
       - name: Copy sev-snp-directboot
-        run: cp ./repository/sev-fw.bin ./snp-fw-direct-boot.bin
+        run: cp ./repository/sev-fw.bin ./snp-fw-directboot.bin
       - name: Create release
         run: gh release create ${{ inputs.releaseName }} --title ${{ inputs.releaseName }} *.bin
         env:
