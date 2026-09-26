@@ -1,0 +1,46 @@
+name: Rust Hypervisor Firmware Release
+on:
+  workflow_dispatch:
+    inputs:
+      releaseName:
+        description: 'Name of the release'
+        type: string
+        required: true
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly-2022-06-10
+          target: x86_64-unknown-linux-gnu
+      - name: Install rust-src
+        run: rustup component add rust-src
+      - name: Checkout sev-snp
+        uses: actions/checkout@v4
+        with:
+          ref: sev-snp
+          path: ./repository
+      - name: Build sev-snp
+        run: cargo b
+        working-directory: ./repository
+      - name: Copy sev-snp
+        run: cp ./repository/sev-fw.bin ./snp-fw.bin
+      - name: Checkout sev-snp-directboot
+        uses: actions/checkout@v4
+        with:
+          ref: sev-snp-directboot
+          path: ./repository
+      - name: Build sev-snp-directboot
+        run: cargo b
+        working-directory: ./repository
+      - name: Copy sev-snp-directboot
+        run: cp ./repository/sev-fw.bin ./snp-fw-direct-boot.bin
+      - name: Create release
+        run: gh release create ${{ inputs.releaseName }} --title ${{ inputs.releaseName }} *.bin
