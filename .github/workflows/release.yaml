@@ -7,10 +7,6 @@ on:
         type: string
         required: true
 
-env:
-  GH_TOKEN: ${{ github.token }}
-
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -21,7 +17,7 @@ jobs:
           toolchain: nightly-2022-06-10
           target: x86_64-unknown-linux-gnu
       - name: Install rust-src
-        run: rustup component add rust-src
+        run: rustup component add rust-src llvm-tools-preview
       - name: Checkout sev-snp
         uses: actions/checkout@v4
         with:
@@ -44,3 +40,5 @@ jobs:
         run: cp ./repository/sev-fw.bin ./snp-fw-direct-boot.bin
       - name: Create release
         run: gh release create ${{ inputs.releaseName }} --title ${{ inputs.releaseName }} *.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
