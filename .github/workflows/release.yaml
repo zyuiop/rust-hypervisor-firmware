@@ -40,8 +40,13 @@ jobs:
         run: cargo b
         working-directory: ./repository
       - name: Copy sev-snp-directboot
-        run: cp ./repository/sev-fw.bin ./snp-fw-directboot.bin
+        run: mv ./sev-fw.bin ./snp-fw-directboot.bin
+        working-directory: ./repository
+      - name: Copy sev-snp
+        run: cp ../snp-fw.bin ./
+        working-directory: ./repository
       - name: Create release
-        run: gh release create ${{ inputs.releaseName }} --title ${{ inputs.releaseName }} *.bin
+        run: gh release create ${{ inputs.releaseName }} --title ${{ inputs.releaseName }} ./snp-fw*.bin
+        working-directory: ./repository
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
